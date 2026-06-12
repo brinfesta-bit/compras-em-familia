@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Histórico de Feiras – Compras em Família">
+  <title>Histórico de Feiras – Compras em Família</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/historico.css">
+</head>
+<body>
+
+<!-- Loading -->
+<div class="loading-overlay" id="loading-overlay">
+  <div style="text-align:center">
+    <div style="width:64px;height:64px;background:linear-gradient(135deg,#10b981,#059669);border-radius:20px;display:flex;align-items:center;justify-content:center;font-size:1.8rem;margin:0 auto 16px;box-shadow:0 0 40px rgba(16,185,129,0.4);">📋</div>
+    <div class="spinner" style="margin-bottom:12px;"></div>
+    <p class="loading-text">Carregando histórico…</p>
+  </div>
+</div>
+
+<!-- App Layout -->
+<div class="app-layout">
+
+  <!-- Header -->
+  <header class="app-header">
+    <a href="app.html" class="header-logo">
+      <div class="header-logo-icon">🛒</div>
+      <span>Compras em Família</span>
+    </a>
+    <div style="flex:1"></div>
+    <div class="header-actions">
+      <a href="app.html" class="btn btn-ghost" style="padding:8px 14px;font-size:0.8rem;">
+        ← Voltar à lista
+      </a>
+      <div class="user-chip" id="user-chip">
+        <div class="user-avatar" id="user-avatar">?</div>
+        <span id="user-email-short">…</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Conteúdo -->
+  <div style="position:relative;z-index:1;flex:1;">
+    <div class="historico-page">
+
+      <!-- Título -->
+      <div class="page-header">
+        <div class="page-title">
+          <div class="icon">📋</div>
+          <div>
+            <h1>Histórico de Feiras</h1>
+            <p class="text-sm text-muted mt-1">Até 24 feiras salvas. Selecione duas para comparar.</p>
+          </div>
+        </div>
+        <button class="btn btn-danger" id="clear-all-btn" style="font-size:0.8rem;">
+          🗑️ Limpar tudo
+        </button>
+      </div>
+
+      <!-- Gráfico de totais -->
+      <div class="chart-wrapper" id="chart-wrapper" style="display:none">
+        <div class="chart-title">💰 Evolução do gasto por feira</div>
+        <div class="bar-chart" id="bar-chart"></div>
+      </div>
+
+      <!-- Grid de feiras -->
+      <div id="feiras-grid" class="feiras-grid">
+        <!-- cards aqui -->
+      </div>
+
+      <div id="no-feiras" class="no-feiras hidden">
+        <div class="big-icon">📦</div>
+        <h3>Nenhuma feira salva ainda</h3>
+        <p>Faça suas compras e use o botão <strong>"Salvar Feira"</strong> na lista principal.</p>
+      </div>
+
+      <!-- Comparação -->
+      <div class="comparison-section hidden" id="comparison-section">
+        <div class="comparison-header">
+          <h2>📊 Comparação de feiras</h2>
+          <span class="vs-badge" id="vs-label">A vs B</span>
+          <button class="btn btn-ghost" id="clear-compare-btn" style="font-size:0.8rem;padding:7px 14px;">
+            Limpar seleção
+          </button>
+        </div>
+
+        <div id="comparison-summary" style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:20px;"></div>
+
+        <div class="comparison-table-wrapper">
+          <table class="comparison-table">
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Categoria</th>
+                <th id="col-a">Feira A</th>
+                <th id="col-b">Feira B</th>
+                <th>Diferença</th>
+              </tr>
+            </thead>
+            <tbody id="comparison-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="select-hint hidden" id="select-hint">
+        👆 Selecione 2 feiras acima para comparar os itens
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast-container"></div>
+
+<!-- Modal usuário -->
+<div class="modal-overlay hidden" id="user-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>👤 Minha conta</h2>
+      <button class="btn btn-ghost btn-icon" id="close-user-modal">✕</button>
+    </div>
+    <div style="text-align:center;padding:8px 0 24px;">
+      <div style="width:64px;height:64px;background:linear-gradient(135deg,var(--accent),var(--accent-dark));border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1.6rem;margin:0 auto 12px;">👤</div>
+      <p style="font-weight:700;font-size:1rem;" id="modal-user-email">…</p>
+    </div>
+    <button class="btn btn-danger w-full" id="logout-btn">🚪 Sair</button>
+  </div>
+</div>
+
+<script type="module">
+  import { auth }  from './js/firebase-config.js';
+  import { db }    from './js/firebase-config.js';
+  import {
+    collection, getDocs, deleteDoc, doc,
+    query, orderBy, onSnapshot, writeBatch
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  import { onAuthStateChanged, signOut }
+    from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+  import { categorias } from './js/data.js';
+
+  const FEIRAS_COL = 'feiras_salvas';
+  const ITEMS_SUB  = 'itens';
+
+  let feirasData   = [];
+  let selectedIds  = [];
+
+  // Auth guard
+  onAuthStateChanged(auth, user => {
+    if (!user) { window.location.href = 'index.html'; return; }
+    const short = user.email.split('@')[0].slice(0,2).toUpperCase();
+    document.getElementById('user-avatar').textContent       = short;
+    document.getElementById('user-email-short').textContent  = user.email.split('@')[0];
+    document.getElementById('modal-user-email').textContent  = user.email;
+    loadFeiras();
+  });
+
+  // Toast
+  function toast(msg, type='success') {
+    const c = document.getElementById('toast-container');
+    const t = document.createElement('div');
+    t.className = `toast ${type}`;
+    t.textContent = msg;
+    c.appendChild(t);
+    setTimeout(() => t.remove(), 3500);
+  }
+
+  function fmt(v) { return `R$ ${(+v||0).toFixed(2).replace('.',',')}` }
+  function fmtDate(ts) {
+    if (!ts) return '—';
+    const d = ts.toDate ? ts.toDate() : new Date(ts);
+    return d.toLocaleDateString('pt-BR', { day:'2-digit', month:'short', year:'numeric' });
+  }
+
+  // Carregar feiras
+  async function loadFeiras() {
+    const col  = collection(db, FEIRAS_COL);
+    const q    = query(col, orderBy('data', 'desc'));
+    const snap = await getDocs(q);
+    feirasData = [];
+    snap.forEach(d => feirasData.push({ id: d.id, ...d.data() }));
+    renderFeiras();
+    hideLoading();
+  }
+
+  function hideLoading() {
+    const lo = document.getElementById('loading-overlay');
+    lo.classList.add('hide');
+    setTimeout(() => lo.remove(), 600);
+  }
+
+  // Render grid
+  function renderFeiras() {
+    const grid    = document.getElementById('feiras-grid');
+    const noMsg   = document.getElementById('no-feiras');
+    const chart   = document.getElementById('chart-wrapper');
+    grid.innerHTML = '';
+
+    if (feirasData.length === 0) {
+      noMsg.classList.remove('hidden');
+      chart.style.display = 'none';
+      return;
+    }
+    noMsg.classList.add('hidden');
+    chart.style.display = 'block';
+
+    for (const feira of feirasData) {
+      const card = document.createElement('div');
+      card.className = 'feira-card';
+      card.dataset.id = feira.id;
+      if (selectedIds.includes(feira.id)) card.classList.add('selected');
+
+      card.innerHTML = `
+        <div class="feira-card-header">
+          <div>
+            <div class="feira-card-title">${escHtml(feira.nome || 'Feira')}</div>
+            <div class="feira-card-date">${fmtDate(feira.data)}</div>
+          </div>
+          <button class="feira-card-delete" data-id="${feira.id}" title="Excluir feira">🗑️</button>
+        </div>
+        <div class="feira-card-total">${fmt(feira.total || 0)}</div>
+        <div class="feira-card-stats">
+          <div class="feira-stat">
+            <span class="feira-stat-label">Itens</span>
+            <span class="feira-stat-value">${feira.totalItens || 0}</span>
+          </div>
+          <div class="feira-stat">
+            <span class="feira-stat-label">Comprados</span>
+            <span class="feira-stat-value text-accent">${feira.comprados || 0}</span>
+          </div>
+        </div>
+        ${selectedIds.includes(feira.id) ? '<div style="margin-top:10px;font-size:0.75rem;font-weight:700;color:var(--accent);">✓ Selecionada para comparar</div>' : ''}
+      `;
+
+      card.addEventListener('click', e => {
+        if (e.target.classList.contains('feira-card-delete')) return;
+        toggleSelect(feira.id);
+      });
+
+      card.querySelector('.feira-card-delete').addEventListener('click', e => {
+        e.stopPropagation();
+        deleteFeira(feira.id, feira.nome);
+      });
+
+      grid.appendChild(card);
+    }
+
+    renderChart();
+    if (selectedIds.length === 2) renderComparison();
+    else hideComparison();
+  }
+
+  // Seleção para comparação
+  function toggleSelect(id) {
+    if (selectedIds.includes(id)) {
+      selectedIds = selectedIds.filter(x => x !== id);
+    } else if (selectedIds.length < 2) {
+      selectedIds.push(id);
+    } else {
+      selectedIds = [selectedIds[1], id];
+    }
+    renderFeiras();
+    if (selectedIds.length === 1) {
+      document.getElementById('select-hint').classList.remove('hidden');
+      document.getElementById('comparison-section').classList.add('hidden');
+    } else if (selectedIds.length === 2) {
+      document.getElementById('select-hint').classList.add('hidden');
+      renderComparison();
+    } else {
+      document.getElementById('select-hint').classList.add('hidden');
+      document.getElementById('comparison-section').classList.add('hidden');
+    }
+  }
+
+  // Gráfico de barras
+  function renderChart() {
+    const chart = document.getElementById('bar-chart');
+    chart.innerHTML = '';
+    if (feirasData.length === 0) return;
+    const maxTotal = Math.max(...feirasData.map(f => f.total || 0));
+    const shown    = [...feirasData].reverse().slice(-12); // últimas 12
+    for (const feira of shown) {
+      const pct   = maxTotal > 0 ? ((feira.total || 0) / maxTotal) * 100 : 0;
+      const col   = document.createElement('div');
+      col.className = 'bar-column';
+      const label = (feira.nome || 'Feira').slice(0, 10);
+      const isSelected = selectedIds.includes(feira.id);
+      col.innerHTML = `
+        <div class="bar-fill" style="height:${pct}%;${isSelected?'filter:brightness(1.3);outline:2px solid var(--accent);':''}">
+          <div class="bar-tooltip">${fmt(feira.total||0)}</div>
+        </div>
+        <div class="bar-label" style="${isSelected?'color:var(--accent);font-weight:700;':''}">${label}</div>
+      `;
+      col.querySelector('.bar-fill').addEventListener('click', () => toggleSelect(feira.id));
+      chart.appendChild(col);
+    }
+  }
+
+  // Comparação item a item
+  async function renderComparison() {
+    const [idA, idB] = selectedIds;
+    const fA = feirasData.find(f => f.id === idA);
+    const fB = feirasData.find(f => f.id === idB);
+    if (!fA || !fB) return;
+
+    document.getElementById('comparison-section').classList.remove('hidden');
+    document.getElementById('vs-label').textContent = `${(fA.nome||'A').slice(0,12)} vs ${(fB.nome||'B').slice(0,12)}`;
+    document.getElementById('col-a').textContent    = fA.nome || 'Feira A';
+    document.getElementById('col-b').textContent    = fB.nome || 'Feira B';
+
+    // Resumo
+    const summary = document.getElementById('comparison-summary');
+    const diff    = (fB.total||0) - (fA.total||0);
+    summary.innerHTML = `
+      <div class="card" style="flex:1;min-width:140px;padding:16px;">
+        <div class="stat-label">Total ${fA.nome||'Feira A'}</div>
+        <div class="stat-value highlight">${fmt(fA.total||0)}</div>
+      </div>
+      <div class="card" style="flex:1;min-width:140px;padding:16px;">
+        <div class="stat-label">Total ${fB.nome||'Feira B'}</div>
+        <div class="stat-value highlight">${fmt(fB.total||0)}</div>
+      </div>
+      <div class="card" style="flex:1;min-width:140px;padding:16px;">
+        <div class="stat-label">Diferença</div>
+        <div class="stat-value ${diff>0?'item-diff-up':diff<0?'item-diff-down':'item-diff-same'}">
+          ${diff>0?'+':''}${fmt(diff)}
+        </div>
+      </div>
+    `;
+
+    // Itens de cada feira
+    const [snapA, snapB] = await Promise.all([
+      getDocs(collection(db, FEIRAS_COL, idA, ITEMS_SUB)),
+      getDocs(collection(db, FEIRAS_COL, idB, ITEMS_SUB))
+    ]);
+
+    const mapA = {}, mapB = {};
+    snapA.forEach(d => { const x = d.data(); mapA[x.nome] = x; });
+    snapB.forEach(d => { const x = d.data(); mapB[x.nome] = x; });
+
+    const allNames = new Set([...Object.keys(mapA), ...Object.keys(mapB)]);
+    const tbody    = document.getElementById('comparison-body');
+    tbody.innerHTML = '';
+
+    const sortedNames = [...allNames].sort();
+    for (const nome of sortedNames) {
+      const iA   = mapA[nome];
+      const iB   = mapB[nome];
+      const pA   = iA?.preco || 0;
+      const pB   = iB?.preco || 0;
+      const diff2 = pB - pA;
+      const cat  = categorias.find(c => c.id === (iA?.categoria || iB?.categoria));
+
+      let diffClass = 'item-diff-same';
+      let diffText  = '—';
+      if (pA > 0 || pB > 0) {
+        if (diff2 > 0)       { diffClass = 'item-diff-up';   diffText = `+${fmt(diff2)}`; }
+        else if (diff2 < 0)  { diffClass = 'item-diff-down'; diffText = fmt(diff2); }
+        else                 { diffClass = 'item-diff-same'; diffText = '= igual'; }
+      }
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${escHtml(nome)}</td>
+        <td><span class="cat-tag">${cat?.icone||'📦'} ${cat?.nome||'—'}</span></td>
+        <td>${pA > 0 ? fmt(pA) : '<span class="text-muted">—</span>'}</td>
+        <td>${pB > 0 ? fmt(pB) : '<span class="text-muted">—</span>'}</td>
+        <td class="${diffClass}">${diffText}</td>
+      `;
+      tbody.appendChild(tr);
+    }
+  }
+
+  function hideComparison() {
+    document.getElementById('comparison-section').classList.add('hidden');
+  }
+
+  // Excluir feira
+  async function deleteFeira(id, nome) {
+    if (!confirm(`Excluir a feira "${nome}"?`)) return;
+    try {
+      // Excluir subcoleção de itens também
+      const iSnap = await getDocs(collection(db, FEIRAS_COL, id, ITEMS_SUB));
+      const batch = writeBatch(db);
+      iSnap.forEach(d => batch.delete(d.ref));
+      batch.delete(doc(db, FEIRAS_COL, id));
+      await batch.commit();
+      feirasData = feirasData.filter(f => f.id !== id);
+      selectedIds = selectedIds.filter(x => x !== id);
+      renderFeiras();
+      toast(`Feira "${nome}" excluída.`, 'success');
+    } catch(e) {
+      toast('Erro ao excluir feira.', 'error');
+    }
+  }
+
+  // Limpar tudo
+  document.getElementById('clear-all-btn').addEventListener('click', async () => {
+    if (!confirm(`Excluir TODAS as ${feirasData.length} feiras do histórico? Esta ação não pode ser desfeita.`)) return;
+    try {
+      const batch = writeBatch(db);
+      for (const feira of feirasData) {
+        const iSnap = await getDocs(collection(db, FEIRAS_COL, feira.id, ITEMS_SUB));
+        iSnap.forEach(d => batch.delete(d.ref));
+        batch.delete(doc(db, FEIRAS_COL, feira.id));
+      }
+      await batch.commit();
+      feirasData = [];
+      selectedIds = [];
+      renderFeiras();
+      toast('Histórico limpo.', 'success');
+    } catch(e) {
+      toast('Erro ao limpar histórico.', 'error');
+    }
+  });
+
+  // Limpar comparação
+  document.getElementById('clear-compare-btn').addEventListener('click', () => {
+    selectedIds = [];
+    renderFeiras();
+    hideComparison();
+    document.getElementById('select-hint').classList.add('hidden');
+  });
+
+  // Usuário
+  document.getElementById('user-chip').addEventListener('click', () => document.getElementById('user-modal').classList.remove('hidden'));
+  document.getElementById('close-user-modal').addEventListener('click', () => document.getElementById('user-modal').classList.add('hidden'));
+  document.getElementById('logout-btn').addEventListener('click', async () => {
+    await signOut(auth);
+    window.location.href = 'index.html';
+  });
+  document.querySelectorAll('.modal-overlay').forEach(o => {
+    o.addEventListener('click', e => { if (e.target === o) o.classList.add('hidden'); });
+  });
+
+  function escHtml(str) {
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+</script>
+
+</body>
+</html>

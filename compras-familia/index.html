@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Compras em Família – App colaborativo de lista de compras em tempo real para toda a família.">
+  <title>Compras em Família – Login</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/login.css">
+</head>
+<body>
+
+<!-- Partículas decorativas -->
+<div class="particles" id="particles"></div>
+
+<!-- Tela de Login -->
+<main class="login-page">
+  <div class="login-box">
+
+    <!-- Logo -->
+    <div class="login-logo">
+      <div class="logo-icon">🛒</div>
+      <h1>Compras em Família</h1>
+      <p>Lista de compras colaborativa em tempo real</p>
+    </div>
+
+    <!-- Card de login -->
+    <div class="login-card">
+      <h2>Entrar na conta</h2>
+
+      <div class="login-error" id="login-error"></div>
+
+      <form id="login-form" novalidate>
+        <div class="form-group">
+          <label for="email">E-mail</label>
+          <div class="input-wrapper">
+            <span class="input-icon">✉️</span>
+            <input
+              type="email"
+              id="email"
+              name="email"
+              class="input"
+              placeholder="seu@email.com"
+              autocomplete="email"
+              required
+            >
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="senha">Senha</label>
+          <div class="input-wrapper">
+            <span class="input-icon">🔒</span>
+            <input
+              type="password"
+              id="senha"
+              name="senha"
+              class="input"
+              placeholder="••••••••"
+              autocomplete="current-password"
+              required
+            >
+            <span class="input-icon-right" id="toggle-senha" title="Mostrar/ocultar senha">👁️</span>
+          </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary login-btn" id="login-btn">
+          <span id="login-btn-text">Entrar</span>
+          <span id="login-spinner" class="hidden">⏳</span>
+        </button>
+      </form>
+
+      <div class="login-footer">
+        <p>Partilhe o acesso com a família usando este mesmo e-mail e senha.</p>
+        <p class="mt-2">
+          Primeira vez? Fale com o administrador para criar a conta.
+        </p>
+      </div>
+    </div>
+
+    <!-- Link criar conta (só admin) -->
+    <div style="text-align:center; margin-top: 16px;">
+      <button class="btn btn-ghost" id="show-register-btn" style="font-size:0.8rem; padding:8px 16px;">
+        Criar conta de administrador
+      </button>
+    </div>
+
+    <!-- Formulário de cadastro (oculto por padrão) -->
+    <div id="register-box" class="login-card mt-3 hidden">
+      <h2>Criar conta</h2>
+      <div class="login-error" id="register-error"></div>
+
+      <form id="register-form" novalidate>
+        <div class="form-group">
+          <label for="reg-email">E-mail</label>
+          <div class="input-wrapper">
+            <span class="input-icon">✉️</span>
+            <input type="email" id="reg-email" class="input" placeholder="admin@email.com" required>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="reg-senha">Senha (mínimo 6 caracteres)</label>
+          <div class="input-wrapper">
+            <span class="input-icon">🔒</span>
+            <input type="password" id="reg-senha" class="input" placeholder="••••••••" required>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary login-btn" id="register-btn">
+          Criar conta
+        </button>
+      </form>
+    </div>
+
+  </div>
+</main>
+
+<div id="toast-container"></div>
+
+<script type="module">
+  import { auth } from './js/firebase-config.js';
+  import {
+    signInWithEmailAndPassword,
+    createUserWithEmailAndPassword,
+    onAuthStateChanged
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+  // Redirecionar se já logado
+  onAuthStateChanged(auth, user => {
+    if (user) window.location.href = 'app.html';
+  });
+
+  // Toggle senha
+  document.getElementById('toggle-senha').addEventListener('click', () => {
+    const input = document.getElementById('senha');
+    const icon  = document.getElementById('toggle-senha');
+    if (input.type === 'password') {
+      input.type = 'text';
+      icon.textContent = '🙈';
+    } else {
+      input.type = 'password';
+      icon.textContent = '👁️';
+    }
+  });
+
+  // Mostrar/ocultar formulário de registro
+  document.getElementById('show-register-btn').addEventListener('click', () => {
+    const box = document.getElementById('register-box');
+    box.classList.toggle('hidden');
+  });
+
+  // Toast helper
+  function showToast(msg, type = 'success') {
+    const c = document.getElementById('toast-container');
+    const t = document.createElement('div');
+    t.className = `toast ${type}`;
+    t.textContent = msg;
+    c.appendChild(t);
+    setTimeout(() => t.remove(), 3500);
+  }
+
+  // Mensagens de erro amigáveis
+  function mapError(code) {
+    const m = {
+      'auth/invalid-email':            'E-mail inválido.',
+      'auth/user-not-found':           'Usuário não encontrado.',
+      'auth/wrong-password':           'Senha incorreta.',
+      'auth/invalid-credential':       'E-mail ou senha incorretos.',
+      'auth/too-many-requests':        'Muitas tentativas. Aguarde um momento.',
+      'auth/email-already-in-use':     'E-mail já cadastrado. Use outro e-mail ou faça login.',
+      'auth/weak-password':            'Senha muito fraca. Use no mínimo 6 caracteres.',
+      'auth/network-request-failed':   'Erro de rede. Verifique sua conexão.',
+      'auth/operation-not-allowed':    '⚠️ Autenticação por e-mail não está ativada no Firebase. Acesse o Console Firebase → Authentication → Sign-in method → E-mail/Senha → Ativar.',
+      'auth/configuration-not-found':  '⚠️ Configuração do Firebase incompleta. Verifique se o Authentication está ativado no Console Firebase.',
+      'auth/internal-error':           'Erro interno do Firebase. Verifique se o Authentication está ativado no Console.',
+      'auth/admin-restricted-operation': '⚠️ Operação restrita. Ative o provedor E-mail/Senha no Firebase Console → Authentication → Sign-in method.',
+    };
+    return m[code] || `Erro: ${code}. Verifique o Console do navegador (F12) para detalhes.`;
+  }
+
+  // Login
+  document.getElementById('login-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const btn  = document.getElementById('login-btn');
+    const err  = document.getElementById('login-error');
+    const email = document.getElementById('email').value.trim();
+    const senha = document.getElementById('senha').value;
+
+    btn.disabled = true;
+    document.getElementById('login-btn-text').textContent = 'Entrando…';
+    err.classList.remove('show');
+
+    try {
+      await signInWithEmailAndPassword(auth, email, senha);
+      // onAuthStateChanged redireciona automaticamente
+    } catch (ex) {
+      err.textContent = mapError(ex.code);
+      err.classList.add('show');
+      btn.disabled = false;
+      document.getElementById('login-btn-text').textContent = 'Entrar';
+    }
+  });
+
+  // Cadastro
+  document.getElementById('register-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const btn   = document.getElementById('register-btn');
+    const err   = document.getElementById('register-error');
+    const email = document.getElementById('reg-email').value.trim();
+    const senha = document.getElementById('reg-senha').value;
+
+    btn.disabled = true;
+    btn.textContent = 'Criando…';
+    err.classList.remove('show');
+
+    try {
+      await createUserWithEmailAndPassword(auth, email, senha);
+      showToast('Conta criada! Redirecionando…', 'success');
+      // onAuthStateChanged redireciona
+    } catch (ex) {
+      console.error('Firebase Auth Error:', ex.code, ex.message, ex);
+      err.textContent = mapError(ex.code);
+      err.classList.add('show');
+      btn.disabled = false;
+      btn.textContent = 'Criar conta';
+    }
+  });
+
+  // Partículas
+  const container = document.getElementById('particles');
+  for (let i = 0; i < 18; i++) {
+    const p = document.createElement('div');
+    p.className = 'particle';
+    p.style.setProperty('--x', `${Math.random() * 100}%`);
+    p.style.setProperty('--dur', `${4 + Math.random() * 6}s`);
+    p.style.setProperty('--delay', `${Math.random() * 6}s`);
+    p.style.width  = `${3 + Math.random() * 5}px`;
+    p.style.height = p.style.width;
+    container.appendChild(p);
+  }
+</script>
+
+</body>
+</html>
